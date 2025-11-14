@@ -1,0 +1,270 @@
+---
+title: "p8105_hw5_jw3638"
+output: github_document
+---
+
+```{r}
+library(tidyverse)
+library(broom)
+```
+# Problem 1: Birthday Simulation
+
+# Set up the simulation function
+```{r}
+bday_sim = function(n_room) {
+  birthdays = sample(1:365, n_room, replace = TRUE)
+  repeated_bday = length(unique(birthdays)) < n_room
+  return(repeated_bday)
+}
+
+#Check true/false function
+bday_sim(5)
+```
+
+# Run simulation 10,000+ times for each group size
+```{r}
+set.seed(1) # so every time you knit the document, you’ll get the same simulation output.
+
+bday_sim_results =
+  expand_grid(
+    bdays = 2:50,
+    iter = 1:10000
+  ) |>
+  mutate(
+    result = map_lgl(bdays, bday_sim)
+  ) |>
+  group_by(bdays) |>
+  summarize(prob_repeat = mean(result)) #Calculates the estimated probability of shared birthdays
+```
+This code runs 10,000 birthday simulations for each group size from 2 to 50, checks whether each simulation contains at least one matching birthday, and then computes the probability of a match by averaging the TRUE/FALSE outcomes.
+
+# Plot the results
+```{r}
+bday_sim_results |>
+  ggplot(aes(x = bdays, y = prob_repeat)) +
+  geom_point(color = "blue", size = 2) +
+  geom_line(color = "blue") +
+  labs(
+    title = "Birthday Problem Simulation",
+    x = "Number of people in the room",
+    y = "Probability of at least one shared birthday"
+  ) +
+  theme_minimal(base_size = 15)
+```
+This simulation illustrates how quickly the probability of a shared birthday grows as the number of people increases. Even though there are 365 possible birthdays, a group needs only about 23 (just under 25) people for there to be a 50% chance of a match. By the time the group reaches 50 people, the probability of a shared birthday is more than 90%. 
+
+This example is useful because it highlights how probability is sometimes not intuitive. Events that seem rare (like two people sharing a birthday) become surprisingly likely when many individuals draw from the same limited set of outcomes. 
+
+# Problem 2: Power, sample size, effect size
+```{r}
+set.seed(2) # So that Problem 2 does not depend on problem 1 (randomness is reproducible)
+```
+
+# Set up the function to simulate a dataset and t-test
+```{r}
+sim_ttest = function(mu, n = 30, sigma = 5) {
+  
+  sim_data = tibble(
+    x = rnorm(n, mean = mu, sd = sigma)
+  )
+  
+  # Set mu = 0
+  test_out = t.test(sim_data$x, mu = 0) |> broom::tidy()
+  
+  # To return the results:
+  tibble(
+    mu_true = mu,
+    mu_hat = test_out$estimate,
+    p_value = test_out$p.value
+  )
+}
+```
+
+Testing it 
+```{r}
+sim_ttest(mu = 0)
+sim_ttest(mu = 3)
+```
+
+Run 5000 simulations for each mu from 0 to 6
+```{r}
+ttest_sims =
+  expand_grid(
+    mu = 0:6, # Repeat the above for 𝜇={1,2,3,4,5,6}
+    iter = 1:5000
+  ) |>
+  mutate(
+    results = map(mu, sim_ttest)
+  ) |>
+  unnest(results)
+```
+
+# Compute power for each true mu
+```{r}
+power_df =
+  ttest_sims |>
+  group_by(mu_true) |>
+  summarize(
+    power = mean(p_value < 0.05)
+  )
+```
+
+# plot power curve (power vs effect size)
+```{r}
+power_df |>
+  ggplot(aes(x = mu_true, y = power)) +
+  geom_point(color = "blue", size = 2) +
+  geom_line(color  = "blue") +
+  labs(
+    title = "Power of One-Sample t-Test",
+    x     = "True mean",
+    y     = "Power"
+  ) +
+  theme_minimal(base_size = 15) # Make wording more visible
+```
+he power curve begins at μ = 0 with a rejection rate of about 0.05, which reflects the expected Type I error rate given the α = 0.05 significance threshold. The plot shows that statistical power increases sharply as the true mean increases. A lower true mean (between 0 to 2), power is lower around 20-60%, meaning the t-test frequently fails to detect these smaller effect sizes with only n = 30 and sigma = 5. Once mu reaches around 3, power rises above 90%, and for mu ≥ 4, power is around 100%, indicating that the test almost always rejects the null when the true effect is large.
+
+# Calculate mean overall and mean only when p<0.05 (among rejections)
+```{r}
+mu_estimates =
+  ttest_sims |>
+  group_by(mu_true) |>
+  summarize(
+    mean_mu_hat = mean(mu_hat), # all samples
+    mean_mu_hat_reject = mean(mu_hat[p_value < 0.05]) # only significant samples/rejections of the null
+  )
+```
+
+# Long format for plot
+```{r}
+mu_estimates_long =
+  mu_estimates |>
+  pivot_longer(
+    cols = c(mean_mu_hat, mean_mu_hat_reject),
+    names_to = "type",
+    values_to = "mean_est"
+  ) |>
+  mutate(
+    type = recode(type, 
+                  mean_mu_hat = "All samples",
+                  mean_mu_hat_reject = "Samples with p < 0.05")
+  )
+```
+
+# Plot mu overall vs. mu among significant results
+```{r}
+mu_estimates_long |>
+  ggplot(aes(x = mu_true, y = mean_est, color = type)) +
+  geom_point(size = 2) +
+  geom_line() +
+  labs(
+    title = "Total vs. Significant: Average estimate of μ",
+    x     = "True mean",
+    y     = "Average of sample means",
+    color = NULL # Looks better without
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "bottom") # Moved it to the bottom so the graph is spaced out
+```
+Across all samples (red line), the average of the estimated means closely matches the true mean for every value, which reflects that the sample mean is an unbiased estimator of the true mean under the Normal distribution. When we restrict to only the samples for which the null hypothesis was rejected (p < 0.05), the average sample mean (blue line) is noticeably higher than the true mean for small effect sizes (mu=0-2). As the true mean becomes large (mu ≥ 3), almost all samples are significant, so the two curves converge again. This demonstrates that conditioning on statistical significance inflates the estimated effect size, especially when power is low.
+
+# Problem 3: Homicide Data
+
+# Load data
+```{r}
+homicide_df = read_csv("data/homicide-data.csv", , na = c("NA", ".", "")) |>
+  janitor::clean_names() 
+
+summary(homicide_df)
+```
+The raw dataset contains 52,179 rows, with each row representing a single homicide case reported in one of 50 large U.S. cities between 2007 and 2017. The dataset includes key variables such as case identifier, the date the homicide was reported, victim’s name, demographic characteristics of the victim, location of the homicide, geographic coordinates of the incident, and case outcome.
+
+# Create city_state and summarize total and unsolved cases
+```{r}
+city_summary =
+  homicide_df |>
+  mutate(
+    city_state = str_c(city, ", ", state),
+    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest") # Unsolved includes both of these variables
+  ) |>
+  group_by(city_state) |>
+  summarize(
+    total = n(),
+    unsolved = sum(unsolved)
+  )
+```
+
+Print a summary table:
+```{r}
+city_summary |>
+  knitr::kable(
+    col.names = c("City, State", "Total", "Unsolved")
+  )
+```
+
+
+# Baltimore: run prop.test and tidy the output
+```{r}
+baltimore_df =
+  city_summary |>
+  filter(city_state == "Baltimore, MD")
+
+baltimore_test =
+  prop.test(
+    x = baltimore_df$unsolved,
+    n = baltimore_df$total
+  )
+
+baltimore_tidy =
+  broom::tidy(baltimore_test)
+
+baltimore_tidy |> 
+  select(estimate, conf.low, conf.high) # This gives estimated proportion unsolved, lower CI, upper CI
+```
+The estimated proportion of homicides that are unsolved in Baltimore is approximately 64.6%. The 95% confidence interval ranges from 0.628 to 0.663, meaning that based on this sample of cases, we can be reasonably confident that between about 62.8% and 66.3% of homicide cases in Baltimore remain unsolved. Because the interval is very narrow, the estimate is precise because of the large number of cases.
+
+# Running prop.test() function for all cities using purrr
+```{r}
+city_results =
+  city_summary |>
+  mutate(
+    prop_test = map2(unsolved, total, prop.test),
+    results = map(prop_test, broom::tidy)
+  ) |>
+  unnest(results) |>
+  select(
+    city_state, 
+    estimate, 
+    conf.low, 
+    conf.high
+  )
+```
+
+Let's look at it
+```{r}
+city_results
+```
+
+Let's plot it
+```{r fig.height=9.5, fig.width=7}
+# Elongated the y axis above so cities aren't crammed ontop of each other
+city_results |>
+  mutate(city_state = fct_reorder(city_state, estimate)) |>
+  ggplot(aes(x = city_state, y = estimate)) +
+  geom_point(color = "blue") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Estimated proportion of unsolved homicides\nby city",
+    x = "City",
+    y = "Proportion unsolved Homicides (95% CI)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_text(size = 9, lineheight = 2),
+    plot.title = element_text(hjust = 0.5),
+    plot.margin = margin(t = 10, r = 20, b = 10, l = 20)
+  )
+```
+The plot shows substantial variation in the proportion of homicides that remain unsolved across the 50 cities. Chicago, New Orleans, and Baltimore have the highest estimated proportions of unsolved cases (around 65–75%), and relatively narrow confidence intervals due to their large number of total homicides. In contrast, Tulsa (Alabama), Richmond, and Charlotte have much lower proportions (around 25–30%) and wider confidence intervals, reflecting smaller case counts and more uncertainty in the estimates.
+
