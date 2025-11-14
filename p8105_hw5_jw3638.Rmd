@@ -172,7 +172,7 @@ Across all samples (red line), the average of the estimated means closely matche
 
 # Load data
 ```{r}
-homicide_df = read_csv("data/homicide-data.csv", , na = c("NA", ".", "")) |>
+homicide_df = read_csv("data/homicide-data.csv", na = c("NA", ".", "")) |>
   janitor::clean_names() 
 
 summary(homicide_df)
@@ -223,6 +223,8 @@ baltimore_tidy |>
 ```
 The estimated proportion of homicides that are unsolved in Baltimore is approximately 64.6%. The 95% confidence interval ranges from 0.628 to 0.663, meaning that based on this sample of cases, we can be reasonably confident that between about 62.8% and 66.3% of homicide cases in Baltimore remain unsolved. Because the interval is very narrow, the estimate is precise because of the large number of cases.
 
+The warning from prop.test() (“Chi-squared approximation may be incorrect”) occurs in cities with very small sample sizes and does not affect the analysis.
+
 # Running prop.test() function for all cities using purrr
 ```{r}
 city_results =
@@ -246,8 +248,7 @@ city_results
 ```
 
 Let's plot it
-```{r fig.height=9.5, fig.width=7}
-# Elongated the y axis above so cities aren't crammed ontop of each other
+```{r}
 city_results |>
   mutate(city_state = fct_reorder(city_state, estimate)) |>
   ggplot(aes(x = city_state, y = estimate)) +
